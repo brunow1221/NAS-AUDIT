@@ -45,6 +45,23 @@ public sealed class PostgreSqlIntegrationTests
             ParserVersion = BasicSambaMessageParser.Version,
             DataMode = DataMode.Historical
         });
+        context.AuditEvents.Add(new AuditEvent
+        {
+            EventTimestampUtc = DateTimeOffset.UtcNow,
+            SmbUser = $"integration-{marker}",
+            ClientIp = "client.example.invalid",
+            Operation = "pwrite",
+            InterpretedAction = AuditAction.Write,
+            InterpretationConfidence = InterpretationConfidence.Confirmed,
+            OperationResult = "ok",
+            FilePath = $"/volume1/PRUEBA_AUDITORIA_SMB/{marker}-live.txt",
+            RawMessage = $"integration live {marker}",
+            EventSource = source,
+            EventSourceId = source.Id,
+            DeduplicationKey = $"{marker}-live",
+            ParserVersion = BasicSambaMessageParser.Version,
+            DataMode = DataMode.Live
+        });
         await context.SaveChangesAsync();
 
         var result = await new AuditReadService(context).GetEventsAsync(new EventQuery(
