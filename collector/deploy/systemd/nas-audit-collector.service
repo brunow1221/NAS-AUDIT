@@ -1,0 +1,27 @@
+[Unit]
+Description=BCMETALS NAS Audit Collector
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=nas-audit-collector
+Group=nas-audit-collector
+SupplementaryGroups=systemd-journal
+EnvironmentFile=/etc/bcmetals-nas-audit/collector.env
+ExecStart=/opt/bcmetals-nas-audit/bin/nas-audit-collector
+Restart=on-failure
+RestartSec=5s
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/bcmetals-nas-audit-collector
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+LockPersonality=true
+MemoryDenyWriteExecute=true
+CapabilityBoundingSet=
+AmbientCapabilities=
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,5 @@
+timestamp,user,ip,operation,result,share,path,message
+2026-10-20T12:00:00Z,usuario_demo,client.example.invalid,create_file,ok,PRUEBA_AUDITORIA_SMB,/volume1/PRUEBA_AUDITORIA_SMB/documento-demo.txt,ugreen_syslog|usuario_demo|client.example.invalid|create_file|ok|0x17019f|file|create|/volume1/PRUEBA_AUDITORIA_SMB/documento-demo.txt
+2026-10-20T12:05:00Z,usuario_demo,client.example.invalid,pwrite,ok,PRUEBA_AUDITORIA_SMB,/volume1/PRUEBA_AUDITORIA_SMB/documento-demo.txt,ugreen_syslog|usuario_demo|client.example.invalid|pwrite|ok|/volume1/PRUEBA_AUDITORIA_SMB/documento-demo.txt
+2026-10-20T12:10:00Z,usuario_demo,client.example.invalid,renameat,ok,PRUEBA_AUDITORIA_SMB,/volume1/PRUEBA_AUDITORIA_SMB/documento-renombrado.txt,ugreen_syslog|usuario_demo|client.example.invalid|renameat|ok|/volume1/PRUEBA_AUDITORIA_SMB/documento-demo.txt|/volume1/PRUEBA_AUDITORIA_SMB/documento-renombrado.txt
+

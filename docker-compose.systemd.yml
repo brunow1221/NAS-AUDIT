@@ -1,0 +1,15 @@
+services:
+  nas-audit-api:
+    ports:
+      - target: 8080
+        published: "${COLLECTOR_API_PORT:?Choose a verified free loopback port}"
+        host_ip: "${SYSTEMD_LOOPBACK_ADDRESS:?Choose a loopback bind address}"
+        protocol: tcp
+    networks:
+      - nas-audit-host
+
+networks:
+  nas-audit-host:
+    name: bcmetals-nas-audit-host
+    driver: bridge
+    internal: false

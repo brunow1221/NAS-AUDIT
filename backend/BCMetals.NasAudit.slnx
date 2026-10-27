@@ -1,0 +1,12 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/BCMetals.NasAudit.Domain/BCMetals.NasAudit.Domain.csproj" />
+    <Project Path="src/BCMetals.NasAudit.Application/BCMetals.NasAudit.Application.csproj" />
+    <Project Path="src/BCMetals.NasAudit.Infrastructure/BCMetals.NasAudit.Infrastructure.csproj" />
+    <Project Path="src/BCMetals.NasAudit.Api/BCMetals.NasAudit.Api.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/BCMetals.NasAudit.Tests/BCMetals.NasAudit.Tests.csproj" />
+  </Folder>
+</Solution>
+

@@ -1,0 +1,82 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - run: node scripts/validate-compose.mjs
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+        working-directory: frontend
+      - run: npm run typecheck
+        working-directory: frontend
+      - run: npm run test
+        working-directory: frontend
+      - run: npm run build
+        working-directory: frontend
+
+  backend:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_DB: nas_audit_test
+          POSTGRES_USER: nas_audit_test
+          POSTGRES_PASSWORD: integration_only_password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U nas_audit_test -d nas_audit_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      TEST_POSTGRES_CONNECTION: Host=localhost;Port=5432;Database=nas_audit_test;Username=nas_audit_test;Password=integration_only_password;Include Error Detail=true
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.402
+      - run: dotnet restore backend/BCMetals.NasAudit.slnx
+      - run: dotnet build backend/BCMetals.NasAudit.slnx --no-restore --configuration Release
+      - run: dotnet test backend/BCMetals.NasAudit.slnx --no-build --configuration Release
+
+  collector:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: collector/go.mod
+          cache: false
+      - run: test -z "$(gofmt -l .)"
+        working-directory: collector
+      - run: go test ./...
+        working-directory: collector
+      - run: go vet ./...
+        working-directory: collector
+
+  operations:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: bash -n scripts/backup.sh scripts/verify-backup.sh scripts/restore-backup.sh scripts/preflight.sh scripts/test-restart.sh scripts/update.sh scripts/rollback.sh scripts/setup-internal-tls.sh
+      - run: node --check scripts/load-test.mjs
+      - run: node scripts/validate-compose.mjs
+

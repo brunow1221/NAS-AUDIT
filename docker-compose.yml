@@ -1,0 +1,222 @@
+name: bcmetals-nas-audit
+
+services:
+  nas-audit-db:
+    image: postgres:18.6-alpine3.24
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:?Configure POSTGRES_DB in .env}
+      POSTGRES_USER: ${POSTGRES_USER:?Configure POSTGRES_USER in .env}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Configure POSTGRES_PASSWORD in .env}
+      TZ: UTC
+    volumes:
+      - ./data/postgres:/var/lib/postgresql
+    networks:
+      - nas-audit-internal
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    restart: unless-stopped
+    stop_grace_period: 60s
+    shm_size: ${POSTGRES_SHM_SIZE:-256m}
+    mem_limit: ${POSTGRES_MEMORY_LIMIT:-2g}
+    cpus: ${POSTGRES_CPU_LIMIT:-2.0}
+    pids_limit: 256
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+
+  nas-audit-api:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      ASPNETCORE_URLS: http://+:8080
+      ConnectionStrings__Default: Host=nas-audit-db;Port=5432;Database=${POSTGRES_DB};Username=${POSTGRES_USER};Password=${POSTGRES_PASSWORD};GSS Encryption Mode=Disable;Include Error Detail=false
+      Bootstrap__AdminEmail: ${INITIAL_ADMIN_EMAIL:-}
+      Bootstrap__AdminPassword: ${INITIAL_ADMIN_PASSWORD:-}
+      Demo__Enabled: ${DEMO_MODE:-false}
+      App__TimeZone: ${APP_TIMEZONE:-America/Santiago}
+      App__CookieSecure: ${COOKIE_SECURE:-true}
+      AllowedHosts: ${APP_ALLOWED_HOSTS:-BCMETALSNAS;bcmetalsnas;bcmetalsnas.local;localhost;nas-audit-api}
+      ForwardedHeaders__KnownNetwork: ${DOCKER_PROXY_NETWORK:?Configure the trusted Docker proxy network in .env}
+      DataProtection__KeysPath: /app/keys
+      Collector__Token: ${COLLECTOR_TOKEN:-not-configured}
+      Retention__Enabled: ${RETENTION_ENABLED:-false}
+      Retention__HistoricalDays: ${RETENTION_HISTORICAL_DAYS:-2555}
+      Retention__LiveDays: ${RETENTION_LIVE_DAYS:-2555}
+      Retention__DemoDays: ${RETENTION_DEMO_DAYS:-90}
+      Retention__IngestionMetadataDays: ${RETENTION_INGESTION_METADATA_DAYS:-365}
+      Retention__RejectedEventDays: ${RETENTION_REJECTED_EVENT_DAYS:-365}
+      Retention__BatchSize: ${RETENTION_BATCH_SIZE:-5000}
+      Retention__RunAtUtcHour: ${RETENTION_RUN_AT_UTC_HOUR:-3}
+      Monitoring__QueueDepthWarning: ${MONITORING_QUEUE_WARNING:-100}
+      Monitoring__NoEventWarningHours: ${MONITORING_NO_EVENT_HOURS:-24}
+      Monitoring__RejectedEventsWarning24Hours: ${MONITORING_REJECTED_WARNING:-1}
+      Monitoring__BehavioralCandidatesEnabled: ${ALERT_CANDIDATES_ENABLED:-false}
+      Monitoring__BehavioralWindowMinutes: ${ALERT_WINDOW_MINUTES:-15}
+      Monitoring__DeletionCandidateThreshold: ${ALERT_DELETION_THRESHOLD:-50}
+      Monitoring__WriteCandidateThreshold: ${ALERT_WRITE_THRESHOLD:-500}
+      Monitoring__SensitivePathPrefixes__0: ${ALERT_SENSITIVE_PATH_0:-}
+    volumes:
+      - ./data/protection-keys:/app/keys
+    depends_on:
+      nas-audit-db:
+        condition: service_healthy
+    networks:
+      - nas-audit-internal
+    expose:
+      - "8080"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/health/live >/dev/null || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 8
+      start_period: 30s
+    restart: unless-stopped
+    stop_grace_period: 30s
+    mem_limit: ${API_MEMORY_LIMIT:-1g}
+    cpus: ${API_CPU_LIMIT:-1.5}
+    pids_limit: 256
+    cap_drop:
+      - ALL
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,noexec,nosuid
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+
+  nas-audit-collector:
+    profiles: ["collector"]
+    build:
+      context: .
+      dockerfile: collector/Dockerfile
+    environment:
+      COLLECTOR_ID: ${COLLECTOR_ID:-bcmetalsnas-primary}
+      COLLECTOR_API_URL: http://nas-audit-api:8080
+      COLLECTOR_TOKEN: ${COLLECTOR_TOKEN:-not-configured}
+      COLLECTOR_CURSOR_PATH: /var/lib/nas-audit-collector/checkpoint.json
+      COLLECTOR_SOURCE_IDENTIFIERS: ${COLLECTOR_SOURCE_IDENTIFIERS:-smbd}
+      COLLECTOR_BATCH_SIZE: ${COLLECTOR_BATCH_SIZE:-50}
+      COLLECTOR_QUEUE_CAPACITY: ${COLLECTOR_QUEUE_CAPACITY:-500}
+    volumes:
+      - ./data/collector:/var/lib/nas-audit-collector
+      - type: bind
+        source: ${JOURNAL_PATH:-/run/log/journal}
+        target: /run/log/journal
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: /etc/machine-id
+        target: /etc/machine-id
+        read_only: true
+        bind:
+          create_host_path: false
+    group_add:
+      - "${JOURNAL_GID:-101}"
+    depends_on:
+      nas-audit-api:
+        condition: service_healthy
+    networks:
+      - nas-audit-internal
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/nas-audit-collector", "--healthcheck"]
+      interval: 20s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    restart: unless-stopped
+    stop_grace_period: 30s
+    mem_limit: ${COLLECTOR_MEMORY_LIMIT:-256m}
+    cpus: ${COLLECTOR_CPU_LIMIT:-0.75}
+    pids_limit: 128
+    cap_drop:
+      - ALL
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,noexec,nosuid
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+
+  nas-audit-web:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+    depends_on:
+      nas-audit-api:
+        condition: service_healthy
+    ports:
+      - target: 8080
+        published: "${APP_PORT:-8092}"
+        protocol: tcp
+      - target: 8443
+        published: "${APP_HTTPS_PORT:-8443}"
+        protocol: tcp
+    volumes:
+      - type: bind
+        source: ./data/tls/server-fullchain.crt
+        target: /etc/nginx/tls/server-fullchain.crt
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ./data/tls/server.key
+        target: /etc/nginx/tls/server.key
+        read_only: true
+        bind:
+          create_host_path: false
+    networks:
+      - nas-audit-edge
+      - nas-audit-internal
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/healthz >/dev/null || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    stop_grace_period: 20s
+    mem_limit: ${WEB_MEMORY_LIMIT:-256m}
+    cpus: ${WEB_CPU_LIMIT:-0.75}
+    pids_limit: 128
+    cap_drop:
+      - ALL
+    read_only: true
+    tmpfs:
+      - /var/cache/nginx:size=32m,noexec,nosuid
+      - /var/run:size=8m,noexec,nosuid
+      - /tmp:size=16m,noexec,nosuid
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+
+networks:
+  nas-audit-edge:
+    name: bcmetals-nas-audit-edge
+    driver: bridge
+    internal: false
+  nas-audit-internal:
+    name: bcmetals-nas-audit-internal
+    internal: true
+

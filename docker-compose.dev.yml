@@ -1,0 +1,25 @@
+name: bcmetals-nas-audit-dev
+
+services:
+  db:
+    image: postgres:18.6-alpine3.24
+    environment:
+      POSTGRES_DB: bcmetals_nas_audit_dev
+      POSTGRES_USER: nas_audit_dev
+      POSTGRES_PASSWORD: local_development_only
+    ports:
+      - target: 5432
+        published: "54329"
+        host_ip: "${DEV_DB_BIND_ADDRESS:?Choose a loopback bind address}"
+        protocol: tcp
+    volumes:
+      - nas-audit-dev-db:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U nas_audit_dev -d bcmetals_nas_audit_dev"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  nas-audit-dev-db:
+
