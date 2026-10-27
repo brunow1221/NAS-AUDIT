@@ -113,8 +113,7 @@ app.Use(async (context, next) =>
 {
     var isProtectedPortalRequest = context.User.Identity?.IsAuthenticated == true &&
         context.Request.Path.StartsWithSegments("/api/v1") &&
-        !context.Request.Path.StartsWithSegments("/api/v1/auth") &&
-        !context.Request.Path.Equals("/api/v1/system/status", StringComparison.OrdinalIgnoreCase);
+        !context.Request.Path.StartsWithSegments("/api/v1/auth");
     if (isProtectedPortalRequest)
     {
         var id = context.User.FindFirstValue(ClaimTypes.NameIdentifier);

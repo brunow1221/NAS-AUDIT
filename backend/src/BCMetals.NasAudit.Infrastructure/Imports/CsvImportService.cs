@@ -248,7 +248,7 @@ public sealed class CsvImportService(AuditDbContext dbContext, ISambaMessagePars
         var path = parsed?.FilePath ?? Find(row, "ruta", "path", "archivo", "file", "nombrearchivo", "filepath");
         var sourcePath = parsed?.SourcePath ?? Find(row, "rutaorigen", "sourcepath", "origenruta");
         var destinationPath = parsed?.DestinationPath ?? Find(row, "rutadestino", "destinationpath", "destinoruta");
-        var action = parsed?.Action ?? Classify(operation, sourcePath, destinationPath);
+        var action = parsed?.Action ?? SmbAuditSemantics.Classify(operation, sourcePath, destinationPath);
         var result = parsed?.Result ?? Find(row, "resultado", "result", "estado", "status") ?? "unknown";
         var user = parsed?.SmbUser ?? Find(row, "usuario", "user", "cuenta", "smbuser", "account");
         var clientIp = parsed?.ClientIp ?? Find(row, "ip", "clientip", "direccionip", "remotehost");
@@ -262,14 +262,14 @@ public sealed class CsvImportService(AuditDbContext dbContext, ISambaMessagePars
             InterpretedAction = action,
             InterpretationConfidence = parsed?.Confidence ?? (action == AuditAction.Unknown ? InterpretationConfidence.Unknown : InterpretationConfidence.Medium),
             OperationResult = result,
-            ShareName = parsed?.ShareName ?? Find(row, "recurso", "share", "carpetacompartida") ?? ExtractShare(destinationPath ?? sourcePath ?? path),
+            ShareName = parsed?.ShareName ?? Find(row, "recurso", "share", "carpetacompartida") ?? SmbAuditSemantics.ExtractShare(destinationPath ?? sourcePath ?? path),
             FilePath = path ?? destinationPath,
             SourcePath = sourcePath,
             DestinationPath = destinationPath,
-            FileExtension = ExtensionOf(destinationPath ?? path ?? sourcePath),
+            FileExtension = SmbAuditSemantics.ExtensionOf(destinationPath ?? path ?? sourcePath),
             ObjectType = parsed?.ObjectType ?? Find(row, "tipoobjeto", "objecttype", "type"),
-            IsAuxiliaryStream = parsed?.IsAuxiliaryStream ?? IsAuxiliaryStream(destinationPath ?? path ?? sourcePath),
-            IsRecyclePath = parsed?.IsRecyclePath ?? (IsRecyclePath(sourcePath) || IsRecyclePath(destinationPath) || IsRecyclePath(path)),
+            IsAuxiliaryStream = parsed?.IsAuxiliaryStream ?? SmbAuditSemantics.IsAuxiliaryStream(destinationPath ?? path ?? sourcePath),
+            IsRecyclePath = parsed?.IsRecyclePath ?? (SmbAuditSemantics.IsRecyclePath(sourcePath) || SmbAuditSemantics.IsRecyclePath(destinationPath) || SmbAuditSemantics.IsRecyclePath(path)),
             RawMessage = string.IsNullOrWhiteSpace(raw) ? JsonSerializer.Serialize(row) : raw,
             EventSourceId = eventSourceId,
             DeduplicationKey = string.Empty,
@@ -419,56 +419,6 @@ public sealed class CsvImportService(AuditDbContext dbContext, ISambaMessagePars
     {
         try { return TimeZoneInfo.FindSystemTimeZoneById("America/Santiago"); }
         catch (TimeZoneNotFoundException) { return TimeZoneInfo.FindSystemTimeZoneById("Pacific SA Standard Time"); }
-    }
-
-    private static AuditAction Classify(string operation, string? source, string? destination) => operation.ToLowerInvariant() switch
-    {
-        "create" or "creation" or "mkdir" or "mkdirat" => AuditAction.Creation,
-        "open" => AuditAction.Open,
-        "pread" or "read" => AuditAction.ObservedRead,
-        "pwrite" or "write" or "ftruncate" or "truncate" or "modification" => AuditAction.Write,
-        "unlinkat" or "unlink" or "rmdir" or "delete" or "deletion" => AuditAction.Deletion,
-        "renameat" or "rename" when ParentPath(source) != ParentPath(destination) => AuditAction.Move,
-        "renameat" or "rename" => AuditAction.Rename,
-        "connect" or "disconnect" or "connection" => AuditAction.Connection,
-        _ => AuditAction.Unknown
-    };
-
-    private static string? ParentPath(string? path)
-    {
-        if (string.IsNullOrWhiteSpace(path)) return null;
-        var normalized = path.Replace('\\', '/').TrimEnd('/');
-        var slash = normalized.LastIndexOf('/');
-        return slash < 0 ? null : normalized[..slash].ToLowerInvariant();
-    }
-
-    private static string? ExtractShare(string? path)
-    {
-        if (string.IsNullOrWhiteSpace(path)) return null;
-        var normalized = path.Replace('\\', '/');
-        const string prefix = "/volume1/";
-        var index = normalized.IndexOf(prefix, StringComparison.OrdinalIgnoreCase);
-        if (index < 0) return null;
-        var remainder = normalized[(index + prefix.Length)..];
-        var slash = remainder.IndexOf('/');
-        return slash < 0 ? remainder : remainder[..slash];
-    }
-
-    private static bool IsAuxiliaryStream(string? path)
-    {
-        if (string.IsNullOrWhiteSpace(path)) return false;
-        var normalized = path.Replace('\\', '/');
-        return normalized.IndexOf(':', normalized.LastIndexOf('/') + 1) >= 0;
-    }
-
-    private static bool IsRecyclePath(string? path) => path?.Replace('\\', '/').Contains("#recycle", StringComparison.OrdinalIgnoreCase) == true;
-
-    private static string? ExtensionOf(string? path)
-    {
-        if (string.IsNullOrWhiteSpace(path)) return null;
-        var normalized = path.Split(':')[0];
-        var extension = Path.GetExtension(normalized);
-        return string.IsNullOrWhiteSpace(extension) ? null : extension.ToLowerInvariant();
     }
 
     private static string NormalizeEvidence(string? value) =>

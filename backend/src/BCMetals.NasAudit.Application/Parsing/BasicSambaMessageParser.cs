@@ -39,14 +39,13 @@ public sealed class BasicSambaMessageParser : ISambaMessageParser
         string? source = null;
         string? destination = null;
         string? objectType = null;
-        var action = AuditAction.Unknown;
+        var action = SmbAuditSemantics.Classify(operation);
         var confidence = InterpretationConfidence.Unknown;
 
         switch (operation)
         {
             case "connect":
             case "disconnect":
-                action = AuditAction.Connection;
                 confidence = InterpretationConfidence.Confirmed;
                 path = NullIfEmpty(tail);
                 break;
@@ -73,26 +72,22 @@ public sealed class BasicSambaMessageParser : ISambaMessageParser
             case "ftruncate":
             case "truncate":
             case "set_nt_acl":
-                action = AuditAction.Write;
                 confidence = InterpretationConfidence.Confirmed;
                 path = NullIfEmpty(tail);
                 break;
             case "pread":
             case "read":
-                action = AuditAction.ObservedRead;
                 confidence = InterpretationConfidence.Medium;
                 path = NullIfEmpty(tail);
                 break;
             case "unlinkat":
             case "unlink":
             case "rmdir":
-                action = AuditAction.Deletion;
                 confidence = InterpretationConfidence.Confirmed;
                 path = NullIfEmpty(tail);
                 break;
             case "mkdirat":
             case "mkdir":
-                action = AuditAction.Creation;
                 confidence = InterpretationConfidence.Confirmed;
                 objectType = "directory";
                 path = NullIfEmpty(tail);
@@ -107,7 +102,7 @@ public sealed class BasicSambaMessageParser : ISambaMessageParser
                 }
 
                 path = destination;
-                action = IsMove(source, destination) ? AuditAction.Move : AuditAction.Rename;
+                action = SmbAuditSemantics.Classify(operation, source, destination);
                 confidence = InterpretationConfidence.Confirmed;
                 break;
             default:
@@ -124,13 +119,13 @@ public sealed class BasicSambaMessageParser : ISambaMessageParser
             action,
             confidence,
             string.IsNullOrWhiteSpace(result) ? "unknown" : result.Trim(),
-            ExtractShare(inspectedPath),
+            SmbAuditSemantics.ExtractShare(inspectedPath),
             path,
             source,
             destination,
             objectType,
-            IsAuxiliaryStream(inspectedPath),
-            IsRecyclePath(source) || IsRecyclePath(destination) || IsRecyclePath(path));
+            SmbAuditSemantics.IsAuxiliaryStream(inspectedPath),
+            SmbAuditSemantics.IsRecyclePath(source) || SmbAuditSemantics.IsRecyclePath(destination) || SmbAuditSemantics.IsRecyclePath(path));
         return true;
     }
 
@@ -189,46 +184,5 @@ public sealed class BasicSambaMessageParser : ISambaMessageParser
         return true;
     }
 
-    private static bool IsMove(string? source, string? destination)
-    {
-        if (IsRecyclePath(destination)) return true;
-        var sourceParent = ParentPath(source);
-        var destinationParent = ParentPath(destination);
-        return sourceParent is not null && destinationParent is not null &&
-            !sourceParent.Equals(destinationParent, StringComparison.OrdinalIgnoreCase);
-    }
-
-    private static string? ParentPath(string? path)
-    {
-        if (string.IsNullOrWhiteSpace(path)) return null;
-        var normalized = path.Replace('\\', '/').TrimEnd('/');
-        var slash = normalized.LastIndexOf('/');
-        return slash <= 0 ? null : normalized[..slash];
-    }
-
-    private static bool IsAuxiliaryStream(string? path)
-    {
-        if (string.IsNullOrWhiteSpace(path)) return false;
-        var normalized = path.Replace('\\', '/');
-        var fileNameStart = normalized.LastIndexOf('/') + 1;
-        return normalized.IndexOf(':', fileNameStart) >= 0;
-    }
-
-    private static bool IsRecyclePath(string? path) =>
-        path?.Replace('\\', '/').Contains("/#recycle/", StringComparison.OrdinalIgnoreCase) == true ||
-        path?.EndsWith("/#recycle", StringComparison.OrdinalIgnoreCase) == true;
-
     private static string? NullIfEmpty(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
-
-    private static string? ExtractShare(string? path)
-    {
-        if (string.IsNullOrWhiteSpace(path)) return null;
-        var normalized = path.Replace('\\', '/');
-        const string prefix = "/volume1/";
-        var index = normalized.IndexOf(prefix, StringComparison.OrdinalIgnoreCase);
-        if (index < 0) return null;
-        var remainder = normalized[(index + prefix.Length)..];
-        var slash = remainder.IndexOf('/');
-        return slash < 0 ? remainder : remainder[..slash];
-    }
 }

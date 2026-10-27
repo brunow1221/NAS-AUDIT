@@ -106,6 +106,14 @@ if (!/location \^~ \/api\/v1\/ingestion\/\s*\{\s*return 404;/m.test(nginx)) {
   console.error('frontend/nginx.conf: Nginx debe bloquear el endpoint interno de ingesta.')
   process.exit(1)
 }
+if (!/location = \/health\/ready\s*\{[\s\S]*?proxy_pass http:\/\/nas-audit-api:8080\/health\/ready;/m.test(nginx)) {
+  console.error('frontend/nginx.conf: readiness debe llegar a la API y no al fallback de la SPA.')
+  process.exit(1)
+}
+if (!/client_max_body_size 21m;/m.test(nginx)) {
+  console.error('frontend/nginx.conf: el sobre multipart debe admitir un archivo CSV de 20 MB.')
+  process.exit(1)
+}
 
 const webDockerfile = readFileSync('frontend/Dockerfile', 'utf8')
 if (!/COPY\s+--chown=nginx:nginx\s+frontend\/nginx\.conf\s+\/etc\/nginx\/conf\.d\/default\.conf/m.test(webDockerfile)) {

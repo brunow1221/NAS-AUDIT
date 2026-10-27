@@ -11,6 +11,8 @@ namespace BCMetals.NasAudit.Api.Controllers;
 [Route("api/v1/imports")]
 public sealed class ImportsController(IImportService importService) : ControllerBase
 {
+    private const int MultipartLimit = 21 * 1024 * 1024;
+
     [HttpGet]
     public async Task<ActionResult<ApiEnvelope<IReadOnlyList<ImportJobDto>>>> List(CancellationToken cancellationToken)
     {
@@ -19,8 +21,8 @@ public sealed class ImportsController(IImportService importService) : Controller
     }
 
     [HttpPost]
-    [RequestFormLimits(MultipartBodyLengthLimit = 20 * 1024 * 1024)]
-    [RequestSizeLimit(20 * 1024 * 1024)]
+    [RequestFormLimits(MultipartBodyLengthLimit = MultipartLimit)]
+    [RequestSizeLimit(MultipartLimit)]
     public async Task<ActionResult<ApiEnvelope<ImportJobDto>>> Upload(IFormFile file, CancellationToken cancellationToken)
     {
         if (file.Length <= 0) return BadRequest(new ProblemDetails { Title = "Seleccione un CSV con contenido." });
@@ -30,8 +32,8 @@ public sealed class ImportsController(IImportService importService) : Controller
     }
 
     [HttpPost("preview")]
-    [RequestFormLimits(MultipartBodyLengthLimit = 20 * 1024 * 1024)]
-    [RequestSizeLimit(20 * 1024 * 1024)]
+    [RequestFormLimits(MultipartBodyLengthLimit = MultipartLimit)]
+    [RequestSizeLimit(MultipartLimit)]
     public async Task<ActionResult<ApiEnvelope<CsvPreviewDto>>> Preview(IFormFile file, CancellationToken cancellationToken)
     {
         if (file.Length <= 0) return BadRequest(new ProblemDetails { Title = "Seleccione un CSV con contenido." });

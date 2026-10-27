@@ -1,4 +1,4 @@
-# Arquitectura definitiva — Fases 0 a 4
+# Arquitectura definitiva — Fases 0 a 5
 
 ## Decisiones
 
@@ -27,7 +27,7 @@ La API se publica solo detrás de Nginx. PostgreSQL vive en una red Compose inte
 - Fase 2 amplió el parser e importador sin cambiar las entidades principales ni invalidar los datos de Fase 1.
 - Fase 3 agregó el módulo `collector/`, autenticación independiente, checkpoints durables, ingesta idempotente, salud y SSE usando el contrato versionado.
 - Fase 4 agregó proyecciones de rutas y cuentas, agrupaciones calculadas, estadísticas e informes sin duplicar la evidencia.
-- Fase 5 decide retención/particionamiento a partir de métricas reales.
+- Fase 5 agregó operación de producción: retención opt-in, respaldos verificables, actualización con rollback, TLS interno y pruebas de reinicio/carga.
 
 No se monta ninguna carpeta SMB en la API. El sistema no ofrece comandos arbitrarios ni operaciones sobre archivos empresariales.
 

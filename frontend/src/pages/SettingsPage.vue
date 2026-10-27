@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
-import { AlertTriangle, CheckCircle2, Clock3, Database, Download, HardDrive, KeyRound, RefreshCw, ServerCog, ShieldCheck, Trash2, UserPlus, UsersRound, Wifi } from '@lucide/vue'
+import { AlertTriangle, CheckCircle2, Clock3, Database, Download, HardDrive, RefreshCw, ServerCog, Trash2, UserPlus, UsersRound, Wifi } from '@lucide/vue'
 import ErrorBanner from '../components/common/ErrorBanner.vue'
 import LoadingState from '../components/common/LoadingState.vue'
 import StatusPill from '../components/common/StatusPill.vue'
+import PasswordForm from '../components/settings/PasswordForm.vue'
 import { apiRequest } from '../services/api'
 import { useAuthStore } from '../stores/auth'
 import type { ApplicationUser, RetentionPreview, SystemStatus } from '../types/api'
@@ -15,11 +16,6 @@ const retention = ref<RetentionPreview | null>(null)
 const applicationUsers = ref<ApplicationUser[]>([])
 const loading = ref(false)
 const error = ref('')
-const currentPassword = ref('')
-const newPassword = ref('')
-const confirmPassword = ref('')
-const passwordMessage = ref('')
-const changingPassword = ref(false)
 const retentionConfirmation = ref('')
 const runningRetention = ref(false)
 const creatingUser = ref(false)
@@ -38,10 +34,14 @@ function bytes(value: number): string {
 }
 
 async function load() {
+  if (auth.user?.mustChangePassword) {
+    status.value = null; retention.value = null; applicationUsers.value = []; loading.value = false; error.value = ''
+    return
+  }
   loading.value = true; error.value = ''
   try {
     const statusRequest = apiRequest<SystemStatus>('/api/v1/system/status')
-    const canLoadAdministration = auth.isAdministrator && !auth.user?.mustChangePassword
+    const canLoadAdministration = auth.isAdministrator
     const retentionRequest = canLoadAdministration ? apiRequest<RetentionPreview>('/api/v1/admin/retention/preview') : Promise.resolve(null)
     const usersRequest = canLoadAdministration ? apiRequest<ApplicationUser[]>('/api/v1/admin/users') : Promise.resolve([])
     const [nextStatus, nextRetention, nextUsers] = await Promise.all([statusRequest, retentionRequest, usersRequest])
@@ -50,15 +50,13 @@ async function load() {
   finally { loading.value = false }
 }
 
-async function changePassword() {
-  passwordMessage.value = ''
-  if (newPassword.value !== confirmPassword.value) { passwordMessage.value = 'La confirmación no coincide.'; return }
-  changingPassword.value = true
-  try {
-    await apiRequest('/api/v1/auth/change-password', { method: 'POST', body: JSON.stringify({ currentPassword: currentPassword.value, newPassword: newPassword.value }) })
-    await auth.refresh(); currentPassword.value = ''; newPassword.value = ''; confirmPassword.value = ''; passwordMessage.value = 'Contraseña actualizada correctamente.'; await load()
-  } catch (reason) { passwordMessage.value = reason instanceof Error ? reason.message : 'No fue posible cambiar la contraseña.' }
-  finally { changingPassword.value = false }
+function startPolling() {
+  if (timer === undefined) timer = window.setInterval(load, 30_000)
+}
+
+async function onPasswordChanged() {
+  await load()
+  startPolling()
 }
 
 async function runRetention() {
@@ -111,13 +109,16 @@ async function resetUserPassword(user: ApplicationUser) {
   } catch (reason) { userMessage.value = reason instanceof Error ? reason.message : 'No fue posible restablecer la contraseña.' }
 }
 
-onMounted(() => { void load(); timer = window.setInterval(load, 30_000) })
-onBeforeUnmount(() => window.clearInterval(timer))
+onMounted(() => {
+  if (!auth.user?.mustChangePassword) { void load(); startPolling() }
+})
+onBeforeUnmount(() => { if (timer !== undefined) window.clearInterval(timer) })
 </script>
 
 <template>
   <div class="settings-page">
-    <section class="page-head"><div><p class="eyebrow">Operación continua</p><h2>Seguridad y estado del sistema</h2><p>Salud consolidada, políticas de conservación y controles administrativos.</p></div><button class="btn-secondary" :disabled="loading" @click="load"><RefreshCw :size="16" />Actualizar</button></section>
+    <section class="page-head"><div><p class="eyebrow">Operación continua</p><h2>Seguridad y estado del sistema</h2><p>Salud consolidada, políticas de conservación y controles administrativos.</p></div><button v-if="!auth.user?.mustChangePassword" class="btn-secondary" :disabled="loading" @click="load"><RefreshCw :size="16" />Actualizar</button></section>
+    <section v-if="auth.user?.mustChangePassword" class="password-required"><PasswordForm @changed="onPasswordChanged" /></section>
     <ErrorBanner v-if="error" :message="error" @retry="load" />
     <LoadingState v-if="loading && !status" />
     <template v-else-if="status">
@@ -132,7 +133,7 @@ onBeforeUnmount(() => window.clearInterval(timer))
       <section class="panel alerts"><div class="card-head"><div><h3>Observaciones operativas</h3><p>Umbrales explícitos para revisión humana; no califican actividad como maliciosa.</p></div><StatusPill :label="status.alerts.length ? `${status.alerts.length} observación(es)` : 'Sin observaciones'" :tone="criticalAlerts ? 'danger' : status.alerts.length ? 'warning' : 'success'" /></div><div v-if="status.alerts.length" class="alert-list"><article v-for="item in status.alerts" :key="item.ruleKey" :class="item.severity"><AlertTriangle :size="18" /><div><strong>{{ item.title }}</strong><span>{{ item.explanation }}</span><small>{{ formatNumber(item.observedCount) }} observación(es) · {{ formatDateTime(item.windowEndUtc) }}</small></div></article></div><div v-else class="all-good"><CheckCircle2 :size="19" />No hay observaciones operativas activas.</div></section>
 
       <section class="two-columns">
-        <article class="panel security"><div class="card-title"><KeyRound :size="18" />Cambiar mi contraseña</div><p>Use al menos 14 caracteres, mayúscula, minúscula, número y símbolo.</p><form @submit.prevent="changePassword"><label class="label">Contraseña actual<input v-model="currentPassword" class="field" type="password" autocomplete="current-password" required /></label><label class="label">Nueva contraseña<input v-model="newPassword" class="field" type="password" autocomplete="new-password" minlength="14" required /></label><label class="label">Confirmar contraseña<input v-model="confirmPassword" class="field" type="password" autocomplete="new-password" minlength="14" required /></label><span v-if="passwordMessage" class="form-message">{{ passwordMessage }}</span><button class="btn-primary" :disabled="changingPassword" type="submit"><ShieldCheck :size="16" />{{ changingPassword ? 'Actualizando…' : 'Actualizar contraseña' }}</button></form></article>
+        <PasswordForm @changed="onPasswordChanged" />
 
         <article class="panel backups"><div class="card-title"><HardDrive :size="18" />Respaldo y recuperación</div><p>Las copias se ejecutan desde SSH para que la aplicación web nunca pueda invocar comandos del NAS.</p><div><strong>Respaldo verificado</strong><span><code>sudo ./scripts/backup.sh</code> genera dump, SHA-256 y manifiesto.</span></div><div><strong>Prueba aislada</strong><span><code>sudo ./scripts/verify-backup.sh ARCHIVO.dump</code> restaura en un contenedor temporal.</span></div><div><strong>Restauración controlada</strong><span>Requiere confirmación explícita y crea una copia previa automática.</span></div></article>
       </section>
@@ -171,7 +172,7 @@ onBeforeUnmount(() => window.clearInterval(timer))
 </template>
 
 <style scoped>
-.settings-page{display:grid;gap:15px}.page-head{display:flex;align-items:flex-end;justify-content:space-between;gap:18px}.page-head h2{margin:0;font-size:24px}.page-head p:not(.eyebrow){margin:5px 0 0;color:#64748b;font-size:13px}.eyebrow{margin:0 0 5px;color:#1d4ed8;font-size:10px;font-weight:800;letter-spacing:.12em;text-transform:uppercase}.health-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}.health{display:grid;grid-template-columns:auto 1fr auto;align-items:center;gap:11px;padding:15px;color:#2563eb}.health span,.health strong,.health small{display:block}.health span{color:#64748b;font-size:9px;text-transform:uppercase}.health strong{color:#0f172a;font-size:12px}.health small{margin-top:3px;color:#64748b;font-size:9px}.metrics{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}.metrics article{display:flex;align-items:center;gap:10px;padding:14px;color:#1d4ed8}.metrics strong,.metrics span{display:block}.metrics strong{color:#0f172a;font-size:19px}.metrics span{color:#64748b;font-size:9px}.alerts,.retention,.security,.backups,.recent-errors{padding:16px}.card-head{display:flex;align-items:start;justify-content:space-between;gap:12px}.card-head h3{margin:0;font-size:14px}.card-head p{margin:4px 0 0;color:#64748b;font-size:10px}.alert-list{display:grid;gap:7px;margin-top:13px}.alert-list article{display:flex;gap:9px;border-left:3px solid;padding:10px;border-radius:7px;background:#f8fafc}.alert-list article.critical{border-color:#dc2626;color:#b91c1c}.alert-list article.warning{border-color:#f59e0b;color:#92400e}.alert-list article.info{border-color:#3b82f6;color:#1d4ed8}.alert-list strong,.alert-list span,.alert-list small{display:block}.alert-list strong{font-size:11px}.alert-list span{margin-top:2px;color:#475569;font-size:10px}.alert-list small{margin-top:4px;color:#94a3b8;font-size:9px}.all-good{display:flex;align-items:center;gap:8px;margin-top:13px;color:#15803d;font-size:11px}.two-columns{display:grid;grid-template-columns:1fr 1fr;gap:14px}.card-title{display:flex;align-items:center;gap:7px;color:#1e3a8a;font-size:13px;font-weight:800}.security>p,.backups>p{color:#64748b;font-size:10px}.security form{display:grid;gap:10px}.security label{display:grid;gap:4px}.form-message{color:#1d4ed8;font-size:10px}.backups>div:not(.card-title){border-top:1px solid #edf2f7;padding:10px 0}.backups strong,.backups span{display:block}.backups strong{font-size:11px}.backups span{margin-top:3px;color:#64748b;font-size:10px;line-height:1.5}.backups code,.retention code{color:#1e3a8a;background:#eff6ff}.policy-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:8px;margin-top:13px}.policy-grid>div{border:1px solid #dbeafe;border-radius:9px;padding:10px}.policy-grid span,.policy-grid strong,.policy-grid small{display:block}.policy-grid span{color:#64748b;font-size:9px}.policy-grid strong{margin:4px 0;font-size:17px}.policy-grid small{color:#94a3b8;font-size:8px}.disabled{color:#92400e!important}.retention-action{display:grid;grid-template-columns:auto 1fr 180px auto;align-items:center;gap:10px;border-top:1px solid #fee2e2;margin-top:13px;padding-top:13px;color:#b91c1c}.retention-action strong,.retention-action span{display:block}.retention-action strong{font-size:11px}.retention-action span{color:#64748b;font-size:9px}.btn-danger{border:0;border-radius:9px;padding:10px 12px;color:#fff;background:#dc2626;font-weight:800}.btn-danger:disabled{opacity:.45}.recent-errors>div:not(.card-title){display:grid;grid-template-columns:150px 140px 1fr;gap:8px;border-top:1px solid #edf2f7;padding:8px 0;font-size:9px}.recent-errors time{color:#64748b}@media(max-width:1100px){.health-grid,.two-columns{grid-template-columns:1fr}.metrics{grid-template-columns:1fr 1fr}.policy-grid{grid-template-columns:repeat(2,1fr)}.retention-action{grid-template-columns:auto 1fr}.retention-action input,.retention-action button{grid-column:2}}@media(max-width:650px){.page-head{align-items:flex-start;flex-direction:column}.metrics,.policy-grid{grid-template-columns:1fr}.health{grid-template-columns:auto 1fr}.health>:last-child{grid-column:2}.recent-errors>div:not(.card-title){grid-template-columns:1fr}.retention-action{grid-template-columns:1fr}.retention-action>*{grid-column:auto!important}}
+.settings-page{display:grid;gap:15px}.page-head{display:flex;align-items:flex-end;justify-content:space-between;gap:18px}.page-head h2{margin:0;font-size:24px}.page-head p:not(.eyebrow){margin:5px 0 0;color:#64748b;font-size:13px}.eyebrow{margin:0 0 5px;color:#1d4ed8;font-size:10px;font-weight:800;letter-spacing:.12em;text-transform:uppercase}.password-required{max-width:560px}.health-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}.health{display:grid;grid-template-columns:auto 1fr auto;align-items:center;gap:11px;padding:15px;color:#2563eb}.health span,.health strong,.health small{display:block}.health span{color:#64748b;font-size:9px;text-transform:uppercase}.health strong{color:#0f172a;font-size:12px}.health small{margin-top:3px;color:#64748b;font-size:9px}.metrics{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}.metrics article{display:flex;align-items:center;gap:10px;padding:14px;color:#1d4ed8}.metrics strong,.metrics span{display:block}.metrics strong{color:#0f172a;font-size:19px}.metrics span{color:#64748b;font-size:9px}.alerts,.retention,.backups,.recent-errors{padding:16px}.card-head{display:flex;align-items:start;justify-content:space-between;gap:12px}.card-head h3{margin:0;font-size:14px}.card-head p{margin:4px 0 0;color:#64748b;font-size:10px}.alert-list{display:grid;gap:7px;margin-top:13px}.alert-list article{display:flex;gap:9px;border-left:3px solid;padding:10px;border-radius:7px;background:#f8fafc}.alert-list article.critical{border-color:#dc2626;color:#b91c1c}.alert-list article.warning{border-color:#f59e0b;color:#92400e}.alert-list article.info{border-color:#3b82f6;color:#1d4ed8}.alert-list strong,.alert-list span,.alert-list small{display:block}.alert-list strong{font-size:11px}.alert-list span{margin-top:2px;color:#475569;font-size:10px}.alert-list small{margin-top:4px;color:#94a3b8;font-size:9px}.all-good{display:flex;align-items:center;gap:8px;margin-top:13px;color:#15803d;font-size:11px}.two-columns{display:grid;grid-template-columns:1fr 1fr;gap:14px}.card-title{display:flex;align-items:center;gap:7px;color:#1e3a8a;font-size:13px;font-weight:800}.backups>p{color:#64748b;font-size:10px}.backups>div:not(.card-title){border-top:1px solid #edf2f7;padding:10px 0}.backups strong,.backups span{display:block}.backups strong{font-size:11px}.backups span{margin-top:3px;color:#64748b;font-size:10px;line-height:1.5}.backups code,.retention code{color:#1e3a8a;background:#eff6ff}.policy-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:8px;margin-top:13px}.policy-grid>div{border:1px solid #dbeafe;border-radius:9px;padding:10px}.policy-grid span,.policy-grid strong,.policy-grid small{display:block}.policy-grid span{color:#64748b;font-size:9px}.policy-grid strong{margin:4px 0;font-size:17px}.policy-grid small{color:#94a3b8;font-size:8px}.disabled{color:#92400e!important}.retention-action{display:grid;grid-template-columns:auto 1fr 180px auto;align-items:center;gap:10px;border-top:1px solid #fee2e2;margin-top:13px;padding-top:13px;color:#b91c1c}.retention-action strong,.retention-action span{display:block}.retention-action strong{font-size:11px}.retention-action span{color:#64748b;font-size:9px}.btn-danger{border:0;border-radius:9px;padding:10px 12px;color:#fff;background:#dc2626;font-weight:800}.btn-danger:disabled{opacity:.45}.recent-errors>div:not(.card-title){display:grid;grid-template-columns:150px 140px 1fr;gap:8px;border-top:1px solid #edf2f7;padding:8px 0;font-size:9px}.recent-errors time{color:#64748b}@media(max-width:1100px){.health-grid,.two-columns{grid-template-columns:1fr}.metrics{grid-template-columns:1fr 1fr}.policy-grid{grid-template-columns:repeat(2,1fr)}.retention-action{grid-template-columns:auto 1fr}.retention-action input,.retention-action button{grid-column:2}}@media(max-width:650px){.page-head{align-items:flex-start;flex-direction:column}.metrics,.policy-grid{grid-template-columns:1fr}.health{grid-template-columns:auto 1fr}.health>:last-child{grid-column:2}.recent-errors>div:not(.card-title){grid-template-columns:1fr}.retention-action{grid-template-columns:1fr}.retention-action>*{grid-column:auto!important}}
 </style>
 
 <style scoped>

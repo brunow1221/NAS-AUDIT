@@ -190,7 +190,7 @@ public sealed class CollectorIngestionService(
             FilePath = parsed.FilePath ?? parsed.DestinationPath,
             SourcePath = parsed.SourcePath,
             DestinationPath = parsed.DestinationPath,
-            FileExtension = ExtensionOf(path),
+            FileExtension = SmbAuditSemantics.ExtensionOf(path),
             ObjectType = parsed.ObjectType,
             IsAuxiliaryStream = parsed.IsAuxiliaryStream,
             IsRecyclePath = parsed.IsRecyclePath,
@@ -236,13 +236,6 @@ public sealed class CollectorIngestionService(
 
     private static IngestionBatchResult Result(IngestionBatch batch, bool replay) =>
         new(batch.BatchId, batch.Accepted, batch.Duplicates, batch.Rejected, batch.ConfirmedCursor, replay);
-
-    private static string? ExtensionOf(string? path)
-    {
-        if (string.IsNullOrWhiteSpace(path)) return null;
-        var extension = Path.GetExtension(path.Split(':')[0]);
-        return string.IsNullOrWhiteSpace(extension) ? null : extension.ToLowerInvariant();
-    }
 
     private static string? Truncate(string? value, int maxLength) =>
         string.IsNullOrWhiteSpace(value) ? null : value[..Math.Min(value.Length, maxLength)];

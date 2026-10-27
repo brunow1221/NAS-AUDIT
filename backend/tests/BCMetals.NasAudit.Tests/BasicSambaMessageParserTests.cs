@@ -67,6 +67,27 @@ public sealed class BasicSambaMessageParserTests
     }
 
     [Fact]
+    public void SharedSemanticsClassifiesMoveToRecycleBin()
+    {
+        var action = SmbAuditSemantics.Classify(
+            "renameat",
+            "/volume1/BCMETALS/informe.txt",
+            "/volume1/BCMETALS/#recycle/informe.txt");
+
+        Assert.Equal(AuditAction.Move, action);
+        Assert.True(SmbAuditSemantics.IsRecyclePath("/volume1/BCMETALS/#RECYCLE/informe.txt"));
+    }
+
+    [Fact]
+    public void SharedSemanticsIgnoresAuxiliaryStreamWhenReadingExtension()
+    {
+        const string path = "/volume1/BCMETALS/informe.PDF:Zone.Identifier";
+
+        Assert.True(SmbAuditSemantics.IsAuxiliaryStream(path));
+        Assert.Equal(".pdf", SmbAuditSemantics.ExtensionOf(path));
+    }
+
+    [Fact]
     public void MalformedMessageIsRejectedWithoutThrowing()
     {
         var result = _parser.TryParse("ugreen_syslog|incompleto", out var parsed);
