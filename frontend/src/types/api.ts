@@ -110,6 +110,7 @@ export interface PathSummary {
   accountCount: number
   firstSeenUtc: string
   lastSeenUtc: string
+  createdAtUtc: string | null
 }
 
 export interface PathTimeline {

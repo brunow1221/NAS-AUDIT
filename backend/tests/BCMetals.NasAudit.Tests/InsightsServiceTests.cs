@@ -57,6 +57,30 @@ public sealed class InsightsServiceTests
     }
 
     [Fact]
+    public async Task ExplorerSeparatesObservedCreationFromFirstAppearance()
+    {
+        await using var context = CreateContext();
+        const string path = "/volume1/PRUEBA_AUDITORIA_SMB/created-later.txt";
+        AddEvent(context, "create_file", AuditAction.Open, path);
+        AddEvent(context, "create_file", AuditAction.Creation, path, seconds: 30);
+        AddEvent(context, "connect", AuditAction.Connection, "/volume1/PRUEBA_AUDITORIA_SMB", seconds: 60);
+        await context.SaveChangesAsync();
+        var service = new InsightsService(context);
+
+        var paths = await service.GetPathsAsync(new PathQuery(DataMode.Live), CancellationToken.None);
+        var timeline = await service.GetPathTimelineAsync(path, DataMode.Live, CancellationToken.None);
+        var connectionOnly = await service.GetPathTimelineAsync(
+            "/volume1/PRUEBA_AUDITORIA_SMB", DataMode.Live, CancellationToken.None);
+
+        Assert.NotNull(timeline);
+        Assert.NotNull(timeline.Summary.CreatedAtUtc);
+        Assert.True(timeline.Summary.CreatedAtUtc > timeline.Summary.FirstSeenUtc);
+        Assert.Equal(timeline.Summary.CreatedAtUtc, paths.Items.Single(x => x.Path == path).CreatedAtUtc);
+        Assert.NotNull(connectionOnly);
+        Assert.Null(connectionOnly.Summary.CreatedAtUtc);
+    }
+
+    [Fact]
     public async Task DownloadableUserReportNeutralizesSpreadsheetFormula()
     {
         await using var context = CreateContext();

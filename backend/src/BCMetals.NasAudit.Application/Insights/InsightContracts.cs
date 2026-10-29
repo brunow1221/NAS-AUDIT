@@ -20,7 +20,8 @@ public sealed record PathSummaryDto(
     long EventCount,
     int AccountCount,
     DateTimeOffset FirstSeenUtc,
-    DateTimeOffset LastSeenUtc);
+    DateTimeOffset LastSeenUtc,
+    DateTimeOffset? CreatedAtUtc);
 
 public sealed record PathTimelineDto(
     PathSummaryDto Summary,
@@ -57,7 +58,8 @@ public sealed record FolderSummaryDto(
     long EventCount,
     int AccountCount,
     DateTimeOffset FirstSeenUtc,
-    DateTimeOffset LastSeenUtc);
+    DateTimeOffset LastSeenUtc,
+    DateTimeOffset? CreatedAtUtc);
 
 public sealed record FolderHistoryDto(
     FolderSummaryDto Summary,

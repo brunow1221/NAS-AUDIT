@@ -29,6 +29,17 @@ public sealed class BasicSambaMessageParserTests
     }
 
     [Fact]
+    public void UgOsOpenIfIsReportedAsProbableCreation()
+    {
+        var parsed = Parse("ugreen_syslog|soporte|client.example.invalid|create_file|ok|0x12019f|file|open_if|/volume1/PRUEBA_AUDITORIA_SMB/prueba.txt");
+
+        Assert.Equal(AuditAction.Creation, parsed.Action);
+        Assert.Equal(InterpretationConfidence.Medium, parsed.Confidence);
+        Assert.Equal("file", parsed.ObjectType);
+        Assert.EndsWith("prueba.txt", parsed.FilePath, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void RenamePreservesSourceAndDestination()
     {
         var parsed = Parse("ugreen_syslog|soporte|client.example.invalid|renameat|ok|/volume1/PRUEBA_AUDITORIA_SMB/original.txt|/volume1/PRUEBA_AUDITORIA_SMB/nuevo.txt");

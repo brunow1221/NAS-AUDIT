@@ -33,7 +33,8 @@ public sealed class InsightsService(AuditDbContext dbContext) : IInsightsService
             Path = x.FilePath!,
             Share = x.ShareName,
             User = x.SmbUser,
-            TimestampUtc = x.EventTimestampUtc
+            TimestampUtc = x.EventTimestampUtc,
+            Action = x.InterpretedAction
         })
             .Union(events.Where(x => x.SourcePath != null).Select(x => new
             {
@@ -41,7 +42,8 @@ public sealed class InsightsService(AuditDbContext dbContext) : IInsightsService
                 Path = x.SourcePath!,
                 Share = x.ShareName,
                 User = x.SmbUser,
-                TimestampUtc = x.EventTimestampUtc
+                TimestampUtc = x.EventTimestampUtc,
+                Action = x.InterpretedAction
             }))
             .Union(events.Where(x => x.DestinationPath != null).Select(x => new
             {
@@ -49,7 +51,8 @@ public sealed class InsightsService(AuditDbContext dbContext) : IInsightsService
                 Path = x.DestinationPath!,
                 Share = x.ShareName,
                 User = x.SmbUser,
-                TimestampUtc = x.EventTimestampUtc
+                TimestampUtc = x.EventTimestampUtc,
+                Action = x.InterpretedAction
             }));
         if (!string.IsNullOrWhiteSpace(query.Search))
         {
@@ -69,13 +72,16 @@ public sealed class InsightsService(AuditDbContext dbContext) : IInsightsService
             EventCount = group.LongCount(),
             AccountCount = group.Where(x => x.User != null).Select(x => x.User).Distinct().Count(),
             FirstSeenUtc = group.Min(x => x.TimestampUtc),
-            LastSeenUtc = group.Max(x => x.TimestampUtc)
+            LastSeenUtc = group.Max(x => x.TimestampUtc),
+            CreatedAtUtc = group.Where(x => x.Action == AuditAction.Creation)
+                .Min(x => (DateTimeOffset?)x.TimestampUtc)
         });
         var total = await grouped.LongCountAsync(cancellationToken);
         var rows = await grouped.OrderByDescending(x => x.LastSeenUtc).ThenBy(x => x.Path)
             .Skip((page - 1) * pageSize).Take(pageSize).ToListAsync(cancellationToken);
         return new PagedResult<PathSummaryDto>(
-            rows.Select(x => new PathSummaryDto(x.Path, x.Share, x.EventCount, x.AccountCount, x.FirstSeenUtc, x.LastSeenUtc)).ToList(),
+            rows.Select(x => new PathSummaryDto(x.Path, x.Share, x.EventCount, x.AccountCount,
+                x.FirstSeenUtc, x.LastSeenUtc, x.CreatedAtUtc)).ToList(),
             page, pageSize, total, (int)Math.Ceiling(total / (double)pageSize));
     }
 
@@ -89,13 +95,17 @@ public sealed class InsightsService(AuditDbContext dbContext) : IInsightsService
         if (total == 0) return null;
         var first = await query.MinAsync(x => x.EventTimestampUtc, cancellationToken);
         var last = await query.MaxAsync(x => x.EventTimestampUtc, cancellationToken);
+        var created = await query.Where(x => x.InterpretedAction == AuditAction.Creation)
+            .OrderBy(x => x.EventTimestampUtc)
+            .Select(x => (DateTimeOffset?)x.EventTimestampUtc)
+            .FirstOrDefaultAsync(cancellationToken);
         var accounts = await query.Where(x => x.SmbUser != null).Select(x => x.SmbUser).Distinct().CountAsync(cancellationToken);
         var events = await query.OrderByDescending(x => x.EventTimestampUtc).ThenByDescending(x => x.Id)
             .Take(MaxTimelineEvents).ToListAsync(cancellationToken);
         var latest = events[0];
         var share = events.Select(x => x.ShareName).FirstOrDefault(x => !string.IsNullOrWhiteSpace(x));
         return new PathTimelineDto(
-            new PathSummaryDto(path, share, total, accounts, first, last),
+            new PathSummaryDto(path, share, total, accounts, first, last, created),
             latest.InterpretedAction == AuditAction.Deletion,
             latest.InterpretedAction is AuditAction.Rename or AuditAction.Move &&
                 string.Equals(latest.SourcePath, path, StringComparison.Ordinal) &&
@@ -159,6 +169,12 @@ public sealed class InsightsService(AuditDbContext dbContext) : IInsightsService
 
         var first = await query.MinAsync(x => x.EventTimestampUtc, cancellationToken);
         var last = await query.MaxAsync(x => x.EventTimestampUtc, cancellationToken);
+        var created = await query.Where(x => x.InterpretedAction == AuditAction.Creation &&
+                x.ObjectType != null && EF.Functions.ILike(x.ObjectType, "%dir%") &&
+                (x.FilePath == path || x.DestinationPath == path))
+            .OrderBy(x => x.EventTimestampUtc)
+            .Select(x => (DateTimeOffset?)x.EventTimestampUtc)
+            .FirstOrDefaultAsync(cancellationToken);
         var accountCount = await query.Where(x => x.SmbUser != null).Select(x => x.SmbUser).Distinct()
             .CountAsync(cancellationToken);
         var share = await query.Where(x => x.ShareName != null).OrderByDescending(x => x.EventTimestampUtc)
@@ -183,7 +199,8 @@ public sealed class InsightsService(AuditDbContext dbContext) : IInsightsService
                 x.ShareName,
                 x.SmbUser,
                 x.EventTimestampUtc,
-                x.ObjectType
+                x.ObjectType,
+                x.InterpretedAction
             })
             .Union(InRange(range).Where(x => x.SourcePath != null &&
                     (x.SourcePath == path || x.SourcePath.StartsWith(prefix)))
@@ -194,7 +211,8 @@ public sealed class InsightsService(AuditDbContext dbContext) : IInsightsService
                     x.ShareName,
                     x.SmbUser,
                     x.EventTimestampUtc,
-                    x.ObjectType
+                    x.ObjectType,
+                    x.InterpretedAction
                 }))
             .Union(InRange(range).Where(x => x.DestinationPath != null &&
                     (x.DestinationPath == path || x.DestinationPath.StartsWith(prefix)))
@@ -205,7 +223,8 @@ public sealed class InsightsService(AuditDbContext dbContext) : IInsightsService
                     x.ShareName,
                     x.SmbUser,
                     x.EventTimestampUtc,
-                    x.ObjectType
+                    x.ObjectType,
+                    x.InterpretedAction
                 }));
         var pathRows = await occurrences.OrderByDescending(x => x.EventTimestampUtc)
             .Take(MaxFolderPathSamples + 1).ToListAsync(cancellationToken);
@@ -221,12 +240,16 @@ public sealed class InsightsService(AuditDbContext dbContext) : IInsightsService
                 group.Select(x => x.Event.EventId).Distinct().LongCount(),
                 group.Where(x => x.Event.SmbUser != null).Select(x => x.Event.SmbUser).Distinct().Count(),
                 group.Min(x => x.Event.EventTimestampUtc),
-                group.Max(x => x.Event.EventTimestampUtc)))
+                group.Max(x => x.Event.EventTimestampUtc),
+                group.Where(x => x.Event.Path == group.Key &&
+                        x.Event.InterpretedAction == AuditAction.Creation &&
+                        x.Event.ObjectType != null && x.Event.ObjectType.Contains("dir", StringComparison.OrdinalIgnoreCase))
+                    .Select(x => (DateTimeOffset?)x.Event.EventTimestampUtc).Min()))
             .OrderBy(x => x.Name, StringComparer.OrdinalIgnoreCase).ToList();
 
         var name = path[(path.LastIndexOf('/') + 1)..];
         return new FolderHistoryDto(
-            new FolderSummaryDto(path, name, share, total, accountCount, first, last),
+            new FolderSummaryDto(path, name, share, total, accountCount, first, last, created),
             pathSampleTruncated,
             subfolders,
             actions,
@@ -435,7 +458,8 @@ public sealed class InsightsService(AuditDbContext dbContext) : IInsightsService
             Path = x.FilePath!,
             Share = x.ShareName,
             User = x.SmbUser,
-            TimestampUtc = x.EventTimestampUtc
+            TimestampUtc = x.EventTimestampUtc,
+            Action = x.InterpretedAction
         })
             .Union(events.Where(x => x.SourcePath != null).Select(x => new
             {
@@ -443,7 +467,8 @@ public sealed class InsightsService(AuditDbContext dbContext) : IInsightsService
                 Path = x.SourcePath!,
                 Share = x.ShareName,
                 User = x.SmbUser,
-                TimestampUtc = x.EventTimestampUtc
+                TimestampUtc = x.EventTimestampUtc,
+                Action = x.InterpretedAction
             }))
             .Union(events.Where(x => x.DestinationPath != null).Select(x => new
             {
@@ -451,7 +476,8 @@ public sealed class InsightsService(AuditDbContext dbContext) : IInsightsService
                 Path = x.DestinationPath!,
                 Share = x.ShareName,
                 User = x.SmbUser,
-                TimestampUtc = x.EventTimestampUtc
+                TimestampUtc = x.EventTimestampUtc,
+                Action = x.InterpretedAction
             }));
         var grouped = occurrences.GroupBy(x => new { x.Path, x.Share }).Select(group => new
         {
@@ -460,17 +486,20 @@ public sealed class InsightsService(AuditDbContext dbContext) : IInsightsService
             EventCount = group.LongCount(),
             AccountCount = group.Where(x => x.User != null).Select(x => x.User).Distinct().Count(),
             FirstSeenUtc = group.Min(x => x.TimestampUtc),
-            LastSeenUtc = group.Max(x => x.TimestampUtc)
+            LastSeenUtc = group.Max(x => x.TimestampUtc),
+            CreatedAtUtc = group.Where(x => x.Action == AuditAction.Creation)
+                .Min(x => (DateTimeOffset?)x.TimestampUtc)
         });
         var count = await grouped.LongCountAsync(cancellationToken);
         EnsureReportLimit(count);
         var rows = await grouped.OrderByDescending(x => x.EventCount).ToListAsync(cancellationToken);
         return WriteCsv("rutas", rows.Count, csv =>
         {
-            WriteHeader(csv, "Ruta", "Recurso", "Eventos", "Cuentas", "Primera actividad UTC", "Última actividad UTC");
+            WriteHeader(csv, "Ruta", "Recurso", "Eventos", "Cuentas", "Creación observada UTC", "Primera actividad UTC", "Última actividad UTC");
             foreach (var row in rows)
             {
                 csv.WriteField(Safe(row.Path)); csv.WriteField(Safe(row.Share)); csv.WriteField(row.EventCount); csv.WriteField(row.AccountCount);
+                csv.WriteField(row.CreatedAtUtc?.ToString("O", CultureInfo.InvariantCulture));
                 csv.WriteField(row.FirstSeenUtc.ToString("O", CultureInfo.InvariantCulture));
                 csv.WriteField(row.LastSeenUtc.ToString("O", CultureInfo.InvariantCulture)); csv.NextRecord();
             }

@@ -9,7 +9,7 @@ namespace BCMetals.NasAudit.Application.Parsing;
 /// </summary>
 public sealed class BasicSambaMessageParser : ISambaMessageParser
 {
-    public const string Version = "phase2-ugos-v2";
+    public const string Version = "phase2-ugos-v3";
     private const string Marker = "ugreen_syslog|";
 
     public bool TryParse(string rawMessage, out ParsedAuditEvent? parsed)
@@ -60,12 +60,18 @@ public sealed class BasicSambaMessageParser : ISambaMessageParser
                 action = disposition.ToLowerInvariant() switch
                 {
                     "create" or "created" => AuditAction.Creation,
+                    // Windows commonly requests FILE_OPEN_IF when creating a file.
+                    // The request may also open an existing file, so retain medium
+                    // confidence instead of presenting it as confirmed evidence.
+                    "open_if" => AuditAction.Creation,
                     "open" or "opened" => AuditAction.Open,
                     _ => AuditAction.Unknown
                 };
-                confidence = action == AuditAction.Unknown
-                    ? InterpretationConfidence.Low
-                    : InterpretationConfidence.Confirmed;
+                confidence = disposition.Equals("open_if", StringComparison.OrdinalIgnoreCase)
+                    ? InterpretationConfidence.Medium
+                    : action == AuditAction.Unknown
+                        ? InterpretationConfidence.Low
+                        : InterpretationConfidence.Confirmed;
                 break;
             case "pwrite":
             case "write":
